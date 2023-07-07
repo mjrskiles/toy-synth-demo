@@ -13,6 +13,8 @@ from .synthesis.signal.sine_wave_oscillator import SineWaveOscillator
 from .synthesis.signal.square_wave_oscillator import SquareWaveOscillator
 from .synthesis.signal.gain import Gain
 from .synthesis.signal.mixer import Mixer
+from .synthesis.signal.low_pass_filter import LowPassFilter
+from .synthesis.signal.delay import Delay
 from .playback.stream_player import StreamPlayer
 
 class Synthesizer(threading.Thread):
@@ -35,6 +37,10 @@ class Synthesizer(threading.Thread):
 
         # Set up the lookup values
         self.osc_mix_vals = np.linspace(0, 1, 128, endpoint=True, dtype=np.float32)
+        self.lpf_cutoff_vals = np.logspace(4, 14, 128, endpoint=True, base=2, dtype=np.float32) # 2^14=16384 : that is the highest possible cutoff value
+        self.delay_times = 0.5 * np.logspace(0, 2, 128, endpoint=True, base=2, dtype=np.float32) - 0.5 # range is from 0 - 1.5s
+        logspaced = np.logspace(0, 1, 128, endpoint=True, dtype=np.float32) # range is from 1-10
+        self.delay_wet_gain_vals = (logspaced - 1) / (10 - 1) # range is from 0-1
 
     def run(self):
         self.stream_player.play()
@@ -80,6 +86,18 @@ class Synthesizer(threading.Thread):
             self.set_gain_b(gain_b_mix_val)
             self.log.info(f"Gain A: {gain_a_mix_val}")
             self.log.info(f"Gain B: {gain_b_mix_val}")
+        elif cc_number == Implementation.LPF_CUTOFF.value:
+            lpf_cutoff = self.lpf_cutoff_vals[val]
+            self.set_lpf_cutoff(lpf_cutoff)
+            self.log.info(f"LPF Cutoff: {lpf_cutoff}")
+        elif cc_number == Implementation.DELAY_TIME.value:
+            delay_time = self.delay_times[val]
+            self.set_delay_time(delay_time)
+            self.log.info(f"Delay Time: {delay_time}s")
+        elif cc_number == Implementation.DELAY_WET_GAIN.value:
+            delay_wet_gain = self.delay_wet_gain_vals[val]
+            self.set_delay_wet_gain(delay_wet_gain)
+            self.log.info(f"Delay Wet Gain: {delay_wet_gain}")
         
 
     def setup_signal_chain(self) -> Chain:
@@ -92,7 +110,11 @@ class Synthesizer(threading.Thread):
 
         mixer = Mixer(self.sample_rate, self.frames_per_chunk, [gain_a, gain_b])
 
-        signal_chain = Chain(mixer)
+        lpf = LowPassFilter(self.sample_rate, self.frames_per_chunk, [mixer], control_tag="lpf")
+
+        delay = Delay(self.sample_rate, self.frames_per_chunk, [lpf], control_tag="delay")
+
+        signal_chain = Chain(delay)
         return signal_chain
     
     def generator(self):
@@ -166,3 +188,21 @@ class Synthesizer(threading.Thread):
             gain_b_components = voice.signal_chain.get_components_by_control_tag("gain_b")
             for gain_b in gain_b_components:
                 gain_b.amp = gain
+
+    def set_lpf_cutoff(self, cutoff):
+        for voice in self.voices:
+            lpf_components = voice.signal_chain.get_components_by_control_tag("lpf")
+            for lpf in lpf_components:
+                lpf.cutoff_frequency = cutoff
+
+    def set_delay_time(self, time):
+        for voice in self.voices:
+            delay_components = voice.signal_chain.get_components_by_control_tag("delay")
+            for delay in delay_components:
+                delay.delay_time = time
+
+    def set_delay_wet_gain(self, gain):
+        for voice in self.voices:
+            delay_components = voice.signal_chain.get_components_by_control_tag("delay")
+            for delay in delay_components:
+                delay.wet_gain = gain
