@@ -6,7 +6,6 @@ class Component():
     """
     Represents a base signal component. A signal component is an iterator.
     The iterator should return an ndarray of size <frames_per_chunk> with type numpy.float32
-    where props is a dictionary of properties related to the array.
 
     A component can have a list of subcomponents, which should also be iterators.
 
